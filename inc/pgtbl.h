@@ -17,6 +17,16 @@
 #define PPN_OFFSET 12U
 #define PTESIZE 4U
 
+#define PTE_PPN_0_MASK 0x3FFUL
+#define PTE_PPN_1_MASK 0xFFFUL
+#define PTE_PPN_0_POS 10
+#define PTE_PPN_1_POS 20
+
+#define PA_PPN_0_MASK 0x3FFUL
+#define PA_PPN_1_MASK 0xFFFUL
+#define PA_PPN_0_POS 12
+#define PA_PPN_1_POS 22
+
 //PTE bit fields
 #define PTE_V_POS 0
 #define PTE_V_MASK 0x1
@@ -84,6 +94,16 @@ size_t offset_from_va(size_t VA);
 bool map_4k_page(size_t VA, size_t PA, pte_perms_t perms, sv32_pgtbl_set_t* pgtbls);
 
 /**
+ * @brief Maps a VA->PA on a 4M page into root_pgtbl. VA gets offset bits removed to map entire 4M physical page.
+ * @param VA The virtual address to be mapped to the page.
+ * @param PA The physical address of the page.
+ * @param perms The PTE permissions for the leaf PTE.
+ * @param pgtbls Pointer to the page table set to map into.
+ * @return A pointer to the page table.
+*/
+bool map_4m_page(size_t VA, size_t PA, pte_perms_t perms, sv32_pgtbl_set_t* pgtbls);
+
+/**
  * @brief Allocates a new page table.
  * @return A pointer to the page table.
 */
@@ -98,14 +118,16 @@ pte_t make_pte_ptr(size_t ppn_to_next_level);
 
 /**
  * @brief Creates a leaf PTE.
+ * @param ppn The PPN.
  * @param perms The permissions of the PTE.
+ * @param level The level of the page table structure being mapped into.
  * @return A leaf pte.
 */
-pte_t make_leaf_pte(size_t ppn, pte_perms_t perms);
+pte_t make_leaf_pte(size_t ppn, pte_perms_t perms, size_t level);
 
 /**
- * @brief Extracts the ppn from a page table or pte.
- * @param root_pgtbl The PTE or page table address.
+ * @brief Extracts the entire PPN from a page table, PTE, or PA.
+ * @param ppn_object The page table, PTE, or PA.
  * @return the PPN.
 */
 size_t get_ppn(intptr_t ppn_object);
@@ -117,5 +139,21 @@ size_t get_ppn(intptr_t ppn_object);
  * @return the VPN.
 */
 size_t vpn_from_va(size_t VA, int level);
+
+/**
+ * @brief Extracts the PPN from a PTE corresponding to level.
+ * @param pte the PTE.
+ * @param level the level in pte.ppn[level].
+ * @return the PPN.
+*/
+size_t extract_ppn_level_from_pte(pte_t pte, int level);
+
+/**
+ * @brief Extracts the PPN from a PA corresponding to level.
+ * @param pa the PA.
+ * @param level the level in pte.ppn[level].
+ * @return the PPN.
+*/
+size_t extract_ppn_level_from_pa(size_t pa, int level);
 
 #endif

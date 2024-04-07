@@ -9,17 +9,34 @@ size_t vpn_from_va(size_t VA, int level) {
     return (VA & (VA_VPN_MASK << VA_VPN_SHIFT)) >> VA_VPN_SHIFT;
 }
 
+size_t extract_ppn_level_from_pte(pte_t pte, int level) {
+    assert(level < LEVELS);
+    //PPN[1] PPN[0] PERMS BITS
+    //  12     10     10
+    if(level) {
+        return extract_field((size_t)pte, PTE_PPN_1_MASK, PTE_PPN_1_POS);
+    } else {
+        return extract_field((size_t)pte, PTE_PPN_0_MASK, PTE_PPN_0_POS);
+    }
+}
+
+size_t extract_ppn_level_from_pa(size_t pa, int level) {
+    assert(level < LEVELS);
+    //PPN[1] PPN[0] PERMS BITS
+    //  12     10     10
+    if(level) {
+        return extract_field(pa, PA_PPN_1_MASK, PA_PPN_1_POS);
+    } else {
+        return extract_field(pa, PA_PPN_0_MASK, PA_PPN_0_POS);
+    }
+}
+
 size_t offset_from_va(size_t VA) {
     return VA & VA_OFFSET_MASK;
 }
 
 size_t get_ppn(intptr_t ppn_object) {
     return (ppn_object & (PPN_MASK << PPN_OFFSET)) >> PPN_OFFSET;
-}
-
-bool get_v_bit(pte_t pte) {
-
-    return false;
 }
 
 void page_fault() {
@@ -57,24 +74,50 @@ pte_t make_pte_ptr(size_t ppn_to_next_level) {
     return ppn_to_next_level*PAGESIZE+(PTE_V_MASK << PTE_V_POS);
 }
 
-pte_t make_leaf_pte(size_t ppn, pte_perms_t perms) {
+pte_t make_leaf_pte(size_t ppn, pte_perms_t perms, size_t level) {
     //represent perms struct as a bit vector
     size_t pte_perms = (perms.valid << PTE_V_POS)+(perms.read << PTE_R_POS)+(perms.write << PTE_W_POS)
                         +(perms.execute << PTE_X_POS)+(perms.user << PTE_U_POS) +(perms.global << PTE_G_POS)
                         +(perms.accessed << PTE_A_POS)+(perms.dirty << PTE_D_POS);
-    return ppn*PAGESIZE+pte_perms;
+    if(level) {
+        return (ppn<<PTE_PPN_1_POS)+pte_perms;
+    } else {
+        return ppn*PAGESIZE+pte_perms;
+    }
+}
+
+bool map_4m_page(size_t VA, size_t PA, pte_perms_t perms, sv32_pgtbl_set_t* pgtbls) {
+    printf("Creating a 4M page mapping VA(0x%x)->PA(0x%x).\n", VA, PA);
+    size_t vpn = vpn_from_va(VA, LEVELS-1);
+    pte_t pte_0 = pgtbls->root_pgtbl->entries[vpn];
+    printf("Root_pgtbl[0x%x]=0x%x\n", vpn, pte_0);
+    if(!(bool)extract_field(pte_0, PTE_V_MASK, PTE_V_POS)) {
+        pte_t leaf_pte = make_leaf_pte(extract_ppn_level_from_pa(PA, LEVELS-1), perms, LEVELS-1);
+        pgtbls->root_pgtbl->entries[vpn] = leaf_pte;
+        printf("=>Root_pgtbl[0x%x]=0x%x\n", vpn, leaf_pte);
+        return true;
+    }
+    printf("A PTE is currently mapped into this space! Aborting.\n");
+    return false;
 }
 
 bool map_4k_page(size_t VA, size_t PA, pte_perms_t perms, sv32_pgtbl_set_t* pgtbls) {
-    pte_t pte_0 = pgtbls->root_pgtbl->entries[vpn_from_va(VA, LEVELS-1)];
+    printf("Creating a 4k page mapping VA(0x%x)->PA(0x%x).\n", VA, PA);
+    size_t vpn_0 = vpn_from_va(VA, LEVELS-1);
+    pte_t pte_0 = pgtbls->root_pgtbl->entries[vpn_0];
+    printf("Root_pgtbl[0x%x]=0x%x\n", vpn_0, pte_0);
     if(!(bool)extract_field(pte_0, PTE_V_MASK, PTE_V_POS)) {
-        printf("Pointer to second level pgtbl not found. Creating one.\n");
-        pgtbls->root_pgtbl->entries[vpn_from_va(VA, LEVELS-1)] = make_pte_ptr(get_ppn((intptr_t)pgtbls->secondary_pgtbl));
+        pte_t ptr_pte = make_pte_ptr(get_ppn((intptr_t)pgtbls->secondary_pgtbl));
+        pgtbls->root_pgtbl->entries[vpn_0] = ptr_pte;
+        printf("=>Root_pgtbl[0x%x]=0x%x\n", vpn_0, ptr_pte);
     }
-    pte_t pte_1 = pgtbls->secondary_pgtbl->entries[vpn_from_va(VA, LEVELS-2)];
+    size_t vpn_1 = vpn_from_va(VA, LEVELS-2);
+    pte_t pte_1 = pgtbls->secondary_pgtbl->entries[vpn_1];
+    printf("secondary_pgtbl[0x%x]=0x%x\n", vpn_1, pte_1);
     if(!(bool)extract_field(pte_1, PTE_V_MASK, PTE_V_POS)) {
-        printf("Mapping last level leaf pte.\n");
-        pgtbls->secondary_pgtbl->entries[vpn_from_va(VA, LEVELS-2)] = make_leaf_pte(get_ppn(PA), perms);
+        pte_t leaf_pte = make_leaf_pte(get_ppn(PA), perms, 0);
+        pgtbls->secondary_pgtbl->entries[vpn_1] = leaf_pte;
+        printf("=>secondary_pgtbl[0x%x]=0x%x\n", vpn_1, leaf_pte);
         return true;
     }
     printf("VA->PA mapping already exists!\n");
@@ -82,15 +125,17 @@ bool map_4k_page(size_t VA, size_t PA, pte_perms_t perms, sv32_pgtbl_set_t* pgtb
 }
 
 size_t pgtbl_walk(size_t VA, page_table_t* root_pgtbl) {
+    printf("Starting page table walk, VA=0x%x\n", VA);
     pte_t leaf_pte = 0;
     page_table_t* current_pgtbl = root_pgtbl;
-    for(size_t i = LEVELS - 1; i >= 0; i--) {
+    size_t i = LEVELS - 1;
+    for(; i >= 0; i--) {
         if(i < 0) {
             printf("Page fault: i < 0\n");
             page_fault();
         }
         pte_t pte =  current_pgtbl->entries[vpn_from_va(VA, i)];
-        printf("pte: 0x%x\n", pte);
+        printf("i=%d, pte=0x%x\n", i, pte);
         bool v_bit = (bool)extract_field(pte, PTE_V_MASK, PTE_V_POS);
         bool r_bit = (bool)extract_field(pte, PTE_R_MASK, PTE_R_POS);
         bool w_bit = (bool)extract_field(pte, PTE_W_MASK, PTE_W_POS);
@@ -109,25 +154,16 @@ size_t pgtbl_walk(size_t VA, page_table_t* root_pgtbl) {
         //change a to pte.ppn, then continue until the leaf is found
         current_pgtbl = (page_table_t*)(get_ppn(pte)*PAGESIZE);
     }
-    //TODO: check if this is a misaligned super page and raise a page fault
+    //check if this is a misaligned super page and raise a page fault
+    if(i > 0 && extract_ppn_level_from_pte(leaf_pte, i-1) != 0) {
+        printf("PAGE FAULT: Misaligned superpage. PTE=0x%x @ %p\n", leaf_pte, &leaf_pte);
+        page_fault();
+    }
 
     //at this point, the leaf PTE has been found and is stored in leaf_pte.
-    printf("Leaf PTE: 0x%x\n", leaf_pte);
-    print_permissions(leaf_pte);
-
     //build PA from the VA and PTE
-    //TODO: superpage translation
-    size_t pa = get_ppn(leaf_pte) + offset_from_va(VA);
+    size_t pa = get_ppn(leaf_pte)*PAGESIZE + offset_from_va(VA);
+    printf("Translation Found! VA(0x%x)->PA(0x%x), ", VA, pa);
+    print_permissions(leaf_pte);
     return pa;
 }
-
-/*
-    printf("a: 0x%x\n", a);
-    printf("PTE Address: %x\n", pte_addr);
-    printf("PTE: 0x%x\n", *pte_addr);
-    printf("i: %d\n", i);
-    printf("va.vpn[%d]: 0x%x\n", i, vpn_from_va(VA, i));
-    printf("va.vpn[i]*PTESIZE: 0x%x\n", vpn_from_va(VA, i)*PTESIZE);
-    printf("a+vpn_from_va(VA, i)*PTESIZE: 0x%x\n", a+vpn_from_va(VA, i)*PTESIZE);
-*/
-
