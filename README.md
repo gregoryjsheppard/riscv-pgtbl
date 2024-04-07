@@ -9,7 +9,7 @@ This code is not production code, and serves only as an example on how to naviga
 
 Contributions and suggestions are welcome.
 
-#How to build
+# How to build
 Navigate to the root of the repository, create a build directory, and run ../make m32. The binary can then be executed as ./pgtbl.
 
 # Things that are TODO
