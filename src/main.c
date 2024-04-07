@@ -16,6 +16,6 @@ int main(int argc, char** argv) {
     printf("root pgtbl ppn: %p\n", pgtbls.root_pgtbl);
     printf("secondary pgtbl ppn: %p\n", pgtbls.secondary_pgtbl);
     map_4k_page(0x12345678, 0x87654321, READ_WRITE_EXECUTE_PAGE, &pgtbls);
-    pgtbl_walk(0x12345678, pgtbls.root_pgtbl);
+    pgtbl_walk(0x12345000, pgtbls.root_pgtbl);
     return 0;
 }

@@ -6,7 +6,7 @@ size_t vpn_from_va(size_t VA, int level) {
     //VPN[1] VPN[0] OFFSET
     //  10     10     12
     size_t VA_VPN_SHIFT = level*10 + 12;
-    return VA & (VA_VPN_MASK << VA_VPN_SHIFT) >> VA_VPN_SHIFT;
+    return (VA & (VA_VPN_MASK << VA_VPN_SHIFT)) >> VA_VPN_SHIFT;
 }
 
 size_t offset_from_va(size_t VA) {
